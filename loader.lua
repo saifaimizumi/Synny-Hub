@@ -17,6 +17,7 @@ local Tabs = {
     General = Window:AddTab({ Title = "General", Icon = "layers" }),
     Teleport = Window:AddTab({ Title = "Teleport", Icon = "plane" }),
     Players = Window:AddTab({ Title = "Players", Icon = "user" }),
+    Webhook = Window:AddTab({ Title = "Webhook", Icon = "bell" }),
     Configuration = Window:AddTab({ Title = "Configuration", Icon = "settings" })
 }
 
@@ -196,129 +197,63 @@ local DropdownRacing = Tabs.General:AddDropdown("DropdownRacing", {
 })
 
 
-local TweenService = game:GetService("TweenService")
 
--- ฟังก์ชันสำหรับค้นหารถของผู้เล่น
-local function findPlayerVehicle(character)
-    local hum = character:FindFirstChildOfClass("Humanoid")
-    if not hum or not hum.SeatPart then return nil end
-    
-    local car = hum.SeatPart.Parent
-    if not car or not car:FindFirstChild("Body") then return nil end
-    
-    local weightPart = car.Body:FindFirstChild("#Weight")
-    if not weightPart then return nil end
-    
-    car.PrimaryPart = weightPart
-    return car
-end
 
--- ฟังก์ชันสำหรับเคลื่อนที่ไปยังพาร์ทที่กำหนด
-local function moveToPart(car, targetPart)
-    local speed = 500  -- ตั้งค่าความเร็วเป็น 500
-    local function driveTo(location)
-        repeat
-            task.wait()
-            local direction = (location - car.PrimaryPart.Position).unit
-            car.PrimaryPart.Velocity = direction * speed
-            car:PivotTo(CFrame.lookAt(car.PrimaryPart.Position, location))
-        until (car.PrimaryPart.Position - location).Magnitude < 10 or not getfenv().autoRace
-        
-        car.PrimaryPart.Velocity = Vector3.new(0, 0, 0)
-    end
-    
-    driveTo(targetPart.Position)
-end
 
--- การตั้งค่า Toggle สำหรับ Auto Race
-local Toggle = Tabs.General:AddToggle("RaceToggle", {
+
+local Toggle = Tabs.General:AddToggle("MyToggle", {
     Title = "Auto Race",
     Default = false
 })
 
-local autoRace = false
-local player = game.Players.LocalPlayer
-local currentCheckpoint = 0 -- เพิ่มตัวแปรติดตาม checkpoint ปัจจุบัน
-
 Toggle:OnChanged(function(value)
-    autoRace = value
-    getfenv().autoRace = value
-    
-    if autoRace then
-        task.spawn(function()
-            currentCheckpoint = 0 -- รีเซ็ตเมื่อเริ่มใหม่
-            
-            while autoRace do
-                local character = player.Character or player.CharacterAdded:Wait()
-                local car = findPlayerVehicle(character)
+    getfenv().autoDriveEnabled = value
+    if value then
+        spawn(function()
+            local player = game.Players.LocalPlayer
+            local hum = player.Character:WaitForChild("Humanoid")
+            local car = hum.SeatPart.Parent
+            local root = car.Body:FindFirstChild("#Weight")
+            car.PrimaryPart = root
 
-                if car then
-                    local race = workspace:FindFirstChild("Races"):FindFirstChild("Race1")
-                    if race then
-                        local checkpoints = race:FindFirstChild("Checkpoints")
-                        if checkpoints then
-                            -- รอที่ Checkpoint1 ก่อนเริ่มแข่ง
-                            if currentCheckpoint == 0 then
-                                local checkpoint1 = checkpoints:FindFirstChild("1")
-                                if checkpoint1 then
-                                    local part1 = checkpoint1:FindFirstChild("Part")
-                                    if part1 then
-                                        moveToPart(car, part1)
-                                        -- รอจนกว่าจะถึง Checkpoint1 จริงๆ
-                                        repeat
-                                            task.wait()
-                                        until (car.PrimaryPart.Position - part1.Position).Magnitude < 10 or not autoRace
-                                        currentCheckpoint = 1
-                                    end
-                                end
-                            end
-                            
-                            -- เริ่มแข่งจริงหลังจากผ่าน Checkpoint1
-                            if currentCheckpoint > 0 then
-                                -- หา Checkpoint ถัดไป
-                                local nextCheckpoint = checkpoints:FindFirstChild(tostring(currentCheckpoint + 1))
-                                if nextCheckpoint then
-                                    local nextPart = nextCheckpoint:FindFirstChild("Part")
-                                    if nextPart then
-                                        moveToPart(car, nextPart)
-                                        -- รอจนถึง Checkpoint นั้นจริงๆ
-                                        repeat
-                                            task.wait()
-                                        until (car.PrimaryPart.Position - nextPart.Position).Magnitude < 10 or not autoRace
-                                        currentCheckpoint = currentCheckpoint + 1
-                                    end
-                                else
-                                    -- ถ้าไม่มี Checkpoint ถัดไป (น่าจะเป็น Finish)
-                                    local finishCheckpoint = checkpoints:FindFirstChild("Finish")
-                                    if finishCheckpoint then
-                                        local finishPart = finishCheckpoint:FindFirstChild("Part")
-                                        if finishPart then
-                                            moveToPart(car, finishPart)
-                                            -- รอจนถึงเส้นชัย
-                                            repeat
-                                                task.wait()
-                                            until (car.PrimaryPart.Position - finishPart.Position).Magnitude < 10 or not autoRace
-                                            currentCheckpoint = 0 -- รีเซ็ตเมื่อจบการแข่ง
-                                        end
-                                    end
-                                end
-                            end
-                        end
-                    end
+            local checkpointsFolder = workspace.Races.Race1.Checkpoints
+            local checkpoints = {}
+
+            for i = 1, 40 do
+                local checkpoint = checkpointsFolder:FindFirstChild(tostring(i))
+                if checkpoint and checkpoint:FindFirstChild("Part") then
+                    table.insert(checkpoints, checkpoint.Part.Position)
                 end
-                
-                task.wait(0.1)
+            end
+
+            local finish = checkpointsFolder:FindFirstChild("Finish")
+            if finish then
+                table.insert(checkpoints, finish.Position)
+            end
+
+            local function moveTo(target)
+                while getfenv().autoDriveEnabled and (car.PrimaryPart.Position - target).Magnitude > 10 do
+                    task.wait()
+                    local currentPos = car.PrimaryPart.Position
+                    local direction = (target - currentPos)
+                    direction = Vector3.new(direction.X, 0, direction.Z)
+                    local distance = direction.Magnitude
+                    if distance < 0.1 then break end
+                    direction = direction.Unit
+
+                    local speed = math.clamp(distance * 10, 50, 200) -- เร่ง-เบรคตามระยะ
+                    car:SetPrimaryPartCFrame(CFrame.lookAt(currentPos, currentPos + direction))
+                    car.PrimaryPart.Velocity = direction * speed
+                end
+                car.PrimaryPart.Velocity = Vector3.zero
+            end
+
+            for _, pos in ipairs(checkpoints) do
+                if not getfenv().autoDriveEnabled then break end
+                local groundPos = Vector3.new(pos.X, car.PrimaryPart.Position.Y, pos.Z)
+                moveTo(groundPos)
             end
         end)
-    else
-        currentCheckpoint = 0 -- รีเซ็ตเมื่อปิดโหมดออโต้
-        local character = player.Character
-        if character then
-            local car = findPlayerVehicle(character)
-            if car then
-                car.PrimaryPart.Velocity = Vector3.new(0, 0, 0)
-            end
-        end
     end
 end)
 
@@ -326,138 +261,88 @@ Toggle:SetValue(false)
 
 
 
-local TweenService = game:GetService("TweenService")
-local RunService = game:GetService("RunService")
-
--- ฟังก์ชันค้นหารถของผู้เล่น
-local function findPlayerVehicle(character)
-    local hum = character:FindFirstChildOfClass("Humanoid")
-    if not hum or not hum.SeatPart then return nil end
-
-    local car = hum.SeatPart.Parent
-    if not car or not car:FindFirstChild("Body") then return nil end
-
-    local weightPart = car.Body:FindFirstChild("#Weight")
-    if not weightPart then return nil end
-
-    car.PrimaryPart = weightPart
-    return car
-end
-
--- ฟังก์ชัน Tween รถจากตำแหน่งปัจจุบันไปยังตำแหน่ง targetPart
-local function tweenToCheckpoint(car, targetPart)
-    if not car.PrimaryPart then return end
-
-    local startPos = car.PrimaryPart.Position
-    local targetPos = targetPart.Position
-    local distance = (targetPos - startPos).Magnitude
-    if distance < 0.1 then return end
-
-    -- ปรับความเร็วตามที่ต้องการ (studs/วินาที)
-    local speed = 250
-    local duration = distance / speed
-
-    -- คำนวณ CFrame สุดท้าย โดยให้รถอยู่ที่ targetPos และหมุนให้หันไปในทิศทางเดิน
-    local targetCFrame = CFrame.lookAt(targetPos, targetPos + (targetPos - startPos).unit)
-
-    -- Anchor PrimaryPart เพื่อควบคุม Tween อย่างราบรื่น
-    car.PrimaryPart.Anchored = true
-
-    local tweenInfo = TweenInfo.new(duration, Enum.EasingStyle.Linear)
-    local tween = TweenService:Create(car.PrimaryPart, tweenInfo, {CFrame = targetCFrame})
-    tween:Play()
-    tween.Completed:Wait()
-
-    car.PrimaryPart.Anchored = false
-end
-
--- ฟังก์ชันรอให้การแข่งขันเริ่ม
-local function waitForRaceStart(race)
-    -- หากมี BoolValue "RaceStarted" ในโมเดล Race1 ให้รอจนกว่าจะเป็น true
-    local raceStartFlag = race:FindFirstChild("RaceStarted")
-    if raceStartFlag and raceStartFlag:IsA("BoolValue") then
-        while not raceStartFlag.Value do
-            task.wait()
-        end
-    else
-        -- ถ้าไม่มี ให้ใช้เวลาเริ่มต้น 3 วินาที
-        task.wait(3)
-    end
-end
-
--- ตั้งค่า Toggle Auto Race (โดยสมมุติว่า UI Framework มี Tabs.General อยู่แล้ว)
-local Toggle = Tabs.General:AddToggle("RaceToggle", {
+local Toggle = Tabs.General:AddToggle("MyToggle", {
     Title = "Auto Race",
     Default = false
 })
 
-local autoRace = false
-local player = game.Players.LocalPlayer
+-- สร้างตัวแปรสำหรับเก็บจุดที่ไปถึงล่าสุด
+local lastCheckpointIndex = 1
 
 Toggle:OnChanged(function(value)
-    autoRace = value
-    getfenv().autoRace = value
+    getfenv().autoDriveEnabled = value
+    if value then
+        spawn(function()
+            local player = game.Players.LocalPlayer
+            local hum = player.Character:WaitForChild("Humanoid")
+            local car = hum.SeatPart.Parent
+            local root = car.Body:FindFirstChild("#Weight")
+            car.PrimaryPart = root
 
-    if autoRace then
-        task.spawn(function()
-            while autoRace do
-                pcall(function()
-                    local character = player.Character or player.CharacterAdded:Wait()
-                    local car = findPlayerVehicle(character)
-                    if not car then return end
+            local function getCheckpoints()
+                local folder = workspace:FindFirstChild("Races")
+                if not folder then return nil end
 
-                    local race = workspace:FindFirstChild("Races") and workspace.Races:FindFirstChild("Race1")
-                    if not race then return end
+                local race = folder:FindFirstChild("Race1")
+                if not race then return nil end
 
-                    local checkpointsFolder = race:FindFirstChild("Checkpoints")
-                    if not checkpointsFolder then return end
+                local checkpointsFolder = race:FindFirstChild("Checkpoints")
+                if not checkpointsFolder then return nil end
 
-                    -- รอให้การแข่งขันเริ่ม (หรือรอ 3 วินาทีถ้าไม่มี flag)
-                    waitForRaceStart(race)
-
-                    -- โหลด Checkpoint (ชื่อ 1 ถึง 40) และ Finish
-                    local checkpoints = {}
-                    for i = 1, 40 do
-                        local cp = checkpointsFolder:FindFirstChild(tostring(i))
-                        if cp and cp:FindFirstChild("Part") then
-                            checkpoints[i] = cp.Part
-                        end
+                local points = {}
+                for i = 1, 40 do
+                    local cp = checkpointsFolder:FindFirstChild(tostring(i))
+                    if cp and cp:FindFirstChild("Part") then
+                        table.insert(points, cp.Part.Position)
                     end
-                    local finishCP = checkpointsFolder:FindFirstChild("Finish")
-                    if finishCP and finishCP:FindFirstChild("Part") then
-                        checkpoints["Finish"] = finishCP.Part
-                    end
+                end
 
-                    -- เริ่มการแข่งขัน: เคลื่อนที่ไปตาม Checkpoint ทีละตัว
-                    for i = 1, 40 do
-                        if not autoRace then break end
-                        local targetCheckpoint = checkpoints[i]
-                        if targetCheckpoint then
-                            tweenToCheckpoint(car, targetCheckpoint)
-                        end
-                    end
+                local finish = checkpointsFolder:FindFirstChild("Finish")
+                if finish then
+                    table.insert(points, finish.Position)
+                end
 
-                    -- หลังจาก Checkpoint 40 ให้เลื่อนไปที่ Finish
-                    if autoRace and checkpoints["Finish"] then
-                        tweenToCheckpoint(car, checkpoints["Finish"])
-                    end
+                return points
+            end
 
-                    -- รีเซ็ตการแข่งขันเพื่อรอบใหม่ (รอให้การแข่งขันรอบถัดไปเริ่ม)
+            local function moveTo(target)
+                while getfenv().autoDriveEnabled and (car.PrimaryPart.Position - target).Magnitude > 10 do
+                    task.wait()
+                    local currentPos = car.PrimaryPart.Position
+
+                    -- ยกสูงขึ้นเพื่อไม่ให้ชน
+                    local flightTarget = Vector3.new(target.X, currentPos.Y + 15, target.Z)
+
+                    local direction = (flightTarget - currentPos)
+                    direction = Vector3.new(direction.X, 0, direction.Z)
+                    local distance = direction.Magnitude
+                    if distance < 0.1 then break end
+                    direction = direction.Unit
+
+                    local speed = math.clamp(distance * 10, 100, 300)
+                    car:SetPrimaryPartCFrame(CFrame.lookAt(currentPos, currentPos + direction))
+                    car.PrimaryPart.Velocity = direction * speed
+                end
+                car.PrimaryPart.Velocity = Vector3.zero
+            end
+
+            while getfenv().autoDriveEnabled do
+                local checkpoints = getCheckpoints()
+                if not checkpoints or #checkpoints == 0 then
+                    warn("ไม่พบ Checkpoints หรือ Finish กำลังรอใหม่...")
                     task.wait(1)
-                end)
-                task.wait(0.1)
+                else
+                    for i = lastCheckpointIndex, #checkpoints do
+                        if not getfenv().autoDriveEnabled then break end
+                        local pos = checkpoints[i]
+                        local flightPos = Vector3.new(pos.X, car.PrimaryPart.Position.Y + 15, pos.Z)
+                        moveTo(flightPos)
+                        lastCheckpointIndex = i + 1
+                    end
+                    break
+                end
             end
         end)
-    else
-        -- เมื่อปิด Auto Race ให้หยุดรถทันที
-        local character = player.Character
-        if character then
-            local car = findPlayerVehicle(character)
-            if car and car.PrimaryPart then
-                car.PrimaryPart.Velocity = Vector3.new(0, 0, 0)
-                car.PrimaryPart.Anchored = false
-            end
-        end
     end
 end)
 
@@ -583,6 +468,111 @@ Tabs.Players:AddToggle("SpectateToggle", {
     end
 end)
 
+
+
+
+local Players = game:GetService("Players")
+local HttpService = game:GetService("HttpService")
+
+local player = Players.LocalPlayer
+local name = player and player.Name or "N/A"
+
+-- ตัวแปรควบคุม
+local WebhookUrl = nil
+local ToggleOn = false
+
+-- สร้าง Input สำหรับรับ Webhook URL
+local Input = Tabs.Webhook:AddInput("Input", {
+    Title = "Webhook",
+    Placeholder = "https://discord.com/api/webhooks/...",
+    Numeric = false,
+    Callback = function(Value)
+        WebhookUrl = Value
+    end
+})
+
+-- Toggle สำหรับเปิด/ปิดการส่ง Webhook
+local Toggle = Tabs.Webhook:AddToggle("MyToggle", {Title = "Send Webhook", Default = false })
+
+Toggle:OnChanged(function(Value)
+    ToggleOn = Value
+
+    if ToggleOn then
+        task.spawn(function()
+            while ToggleOn do
+                -- อ่านค่า Cash เฉพาะตอนจะส่ง
+                local cashValue = "N/A"
+                local leaderstats = player:FindFirstChild("leaderstats")
+                if not leaderstats then
+                    leaderstats = player:WaitForChild("leaderstats", 5)
+                end
+
+                if leaderstats then
+                    local cash = leaderstats:FindFirstChild("Cash")
+                    if not cash then
+                        cash = leaderstats:WaitForChild("Cash", 5)
+                    end
+                    if cash then
+                        cashValue = "You Have Cash: " .. tostring(cash.Value)
+                    end
+                end
+
+                -- ถ้ามี Webhook URL
+                if WebhookUrl and WebhookUrl:match("^https://discord.com/api/webhooks/") then
+                    local data = {
+                        username = "SYNNY HUB",
+                        avatar_url = "https://cdn.discordapp.com/attachments/1370701716235882496/1370714284983582750/IMG_20250510_174818.jpg",
+                        embeds = {{
+                            title = "MAP : Midnight Chaser🚗",
+                            description = "เธอคะเราส่งแจ้งเตือนWebhookให้แล้วนะ",
+                            url = "https://cdn.discordapp.com/attachments/1370701716235882496/1370709924493000754/0e4810ef4e329a46.png",
+                            color = 15685887,
+                            fields = {
+                                { name = "Name Player", value = name },
+                                { name = "Profile Player", value = cashValue }
+                            }
+                        }}
+                    }
+
+                    local headers = { ["Content-Type"] = "application/json" }
+                    local requestFunc = http_request or request or (syn and syn.request)
+
+                    if requestFunc then
+                        local success, result = pcall(function()
+                            return requestFunc({
+                                Url = WebhookUrl,
+                                Method = "POST",
+                                Headers = headers,
+                                Body = HttpService:JSONEncode(data)
+                            })
+                        end)
+
+                        if success and result and result.StatusCode == 204 then
+                            print("✅ ส่ง Webhook สำเร็จ!")
+                        else
+                            warn("❌ ส่ง Webhook ไม่สำเร็จ:", result and result.StatusCode, result and result.Body)
+                        end
+                    else
+                        warn("❌ ไม่สามารถใช้ requestFunc ได้ในสภาพแวดล้อมนี้")
+                    end
+                else
+                    warn("⚠️ กรุณาใส่ Webhook URL ที่ถูกต้องก่อนเริ่มส่ง")
+                end
+
+                -- รอ 5 นาที (300 วินาที) ก่อนส่งรอบถัดไป
+                for i = 1, 300 do
+                    if not ToggleOn then break end
+                    task.wait(1)
+                end
+            end
+        end)
+    end
+end)
+
+Toggle:SetValue(false)
+
+
+
     
     local ServerID = Tabs.Configuration:AddSection("️Server ID")
 
@@ -623,150 +613,4 @@ end)
     
     local Server = Tabs.Configuration:AddSection("Server")
 
-    Tabs.Configuration:AddButton({
-        Title = "Rejoin Server",
-        Description = "",
-        Callback = function()
-            local ts = game:GetService("TeleportService")
-    
-            local p = game:GetService("Players").LocalPlayer
-            
-             
-            
-            ts:Teleport(game.PlaceId, p)
-        end
-    })
-    
-    Tabs.Configuration:AddButton({
-        Title = "Hop Server",
-        Description = "",
-        Callback = function()
-            local Http = game:GetService("HttpService")
-            local TPS = game:GetService("TeleportService")
-            local Api = "https://games.roblox.com/v1/games/"
-            
-            local _place = game.PlaceId
-            local _servers = Api.._place.."/servers/Public?sortOrder=Asc&limit=100"
-            function ListServers(cursor)
-               local Raw = game:HttpGet(_servers .. ((cursor and "&cursor="..cursor) or ""))
-               return Http:JSONDecode(Raw)
-            end
-            
-            local Server, Next; repeat
-               local Servers = ListServers(Next)
-               Server = Servers.data[1]
-               Next = Servers.nextPageCursor
-            until Server
-            
-            TPS:TeleportToPlaceInstance(_place,Server.id,game.Players.LocalPlayer)
-        end
-    })
-    
-local TeleportService = game:GetService("TeleportService")
-local Players = game:GetService("Players")
-local AutoRejoin = false
-
-local Toggle = Tabs.Configuration:AddToggle("MyToggle", {Title = "Auto Rejoin Server", Default = false })
-Toggle:OnChanged(function(value)
-    AutoRejoin = value
-end)
-
-Players.LocalPlayer.OnTeleport:Connect(function(State)
-    if AutoRejoin and State == Enum.TeleportState.Failed then
-        TeleportService:TeleportToPlaceInstance(game.PlaceId, game.JobId, Players.LocalPlayer)
-    end
-end)
-
-game:GetService("CoreGui").RobloxPromptGui.promptOverlay.ChildAdded:Connect(function(child)
-    if AutoRejoin and child:IsA("Frame") and child.Name == "ErrorPrompt" then
-        TeleportService:Teleport(game.PlaceId, Players.LocalPlayer)
-    end
-end)
-
-
-
-    
-    
-
--- Addons:
--- SaveManager (Allows you to have a configuration system)
--- InterfaceManager (Allows you to have a interface managment system)
-
--- Hand the library over to our managers
-SaveManager:SetLibrary(Fluent)
-InterfaceManager:SetLibrary(Fluent)
-
--- Ignore keys that are used by ThemeManager.
--- (we dont want configs to save themes, do we?)
-SaveManager:IgnoreThemeSettings()
-
--- You can add indexes of elements the save manager should ignore
-SaveManager:SetIgnoreIndexes({})
-
--- use case for doing it this way:
--- a script hub could have themes in a global folder
--- and game configs in a separate folder per game
-InterfaceManager:SetFolder("FluentScriptHub")
-SaveManager:SetFolder("FluentScriptHub/specific-game")
-
-InterfaceManager:BuildInterfaceSection(Tabs.Configuration)
-
-Window:SelectTab(1)
-
-Fluent:Notify({
-    Title = "Notification",
-    Content = "The script has been loaded.",
-    Duration = 5
-})
-
--- You can use the SaveManager:LoadAutoloadConfig() to load a config
--- which has been marked to be one that auto loads!
-SaveManager:LoadAutoloadConfig()
-
-
-
---Ui
-
-do
-    local ToggleUI = game.CoreGui:FindFirstChild("MyToggle") 
-    if ToggleUI then 
-    ToggleUI:Destroy()
-    end
-end
-
-local MyToggle = Instance.new("ScreenGui")
-local ImageButton = Instance.new("ImageButton")
-local UICorner = Instance.new("UICorner")
-
---Properties:
-
-MyToggle.Name = "MyToggle"
-MyToggle.Parent = game.CoreGui
-MyToggle.ZIndexBehavior = Enum.ZIndexBehavior.Sibling
-
-ImageButton.Parent = MyToggle
-ImageButton.BackgroundColor3 = Color3.fromRGB(255, 255, 255)
-ImageButton.BorderColor3 = Color3.fromRGB(0, 0, 0)
-ImageButton.BorderSizePixel = 0
-ImageButton.Position = UDim2.new(0.156000003, 0, -0, 0)
-ImageButton.Size = UDim2.new(0, 50, 0, 50)
-ImageButton.Image = "rbxassetid://78124003418155"
-ImageButton.MouseButton1Click:Connect(function()
-game.CoreGui:FindFirstChild("ScreenGui").Enabled = not game.CoreGui:FindFirstChild("ScreenGui").Enabled
-end)
-
-
-UICorner.CornerRadius = UDim.new(0, 10)
-UICorner.Parent = ImageButton
-
-
---AFK
-game:GetService("Players").LocalPlayer.Idled:Connect(function()
-    game:GetService("VirtualUser"):CaptureController()
-    game:GetService("VirtualUser"):ClickButton2(Vector2.new())
-end)
-
-while wait(180) do
-    game:GetService("VirtualUser"):CaptureController()
-    game:GetService("VirtualUser"):ClickButton2(Vector2.new())
-end
+    T
