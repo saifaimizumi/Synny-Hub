@@ -613,4 +613,192 @@ Toggle:SetValue(false)
     
     local Server = Tabs.Configuration:AddSection("Server")
 
-    T
+    Tabs.Configuration:AddButton({
+        Title = "Rejoin Server",
+        Description = "",
+        Callback = function()
+            local ts = game:GetService("TeleportService")
+    
+            local p = game:GetService("Players").LocalPlayer
+            
+             
+            
+            ts:Teleport(game.PlaceId, p)
+        end
+    })
+    
+    Tabs.Configuration:AddButton({
+        Title = "Hop Server",
+        Description = "",
+        Callback = function()
+            local Http = game:GetService("HttpService")
+            local TPS = game:GetService("TeleportService")
+            local Api = "https://games.roblox.com/v1/games/"
+            
+            local _place = game.PlaceId
+            local _servers = Api.._place.."/servers/Public?sortOrder=Asc&limit=100"
+            function ListServers(cursor)
+               local Raw = game:HttpGet(_servers .. ((cursor and "&cursor="..cursor) or ""))
+               return Http:JSONDecode(Raw)
+            end
+            
+            local Server, Next; repeat
+               local Servers = ListServers(Next)
+               Server = Servers.data[1]
+               Next = Servers.nextPageCursor
+            until Server
+            
+            TPS:TeleportToPlaceInstance(_place,Server.id,game.Players.LocalPlayer)
+        end
+    })
+    
+local TeleportService = game:GetService("TeleportService")
+local Players = game:GetService("Players")
+local AutoRejoin = false
+
+local Toggle = Tabs.Configuration:AddToggle("MyToggle", {Title = "Auto Rejoin Server", Default = false })
+Toggle:OnChanged(function(value)
+    AutoRejoin = value
+end)
+
+Players.LocalPlayer.OnTeleport:Connect(function(State)
+    if AutoRejoin and State == Enum.TeleportState.Failed then
+        TeleportService:TeleportToPlaceInstance(game.PlaceId, game.JobId, Players.LocalPlayer)
+    end
+end)
+
+game:GetService("CoreGui").RobloxPromptGui.promptOverlay.ChildAdded:Connect(function(child)
+    if AutoRejoin and child:IsA("Frame") and child.Name == "ErrorPrompt" then
+        TeleportService:Teleport(game.PlaceId, Players.LocalPlayer)
+    end
+end)
+
+
+
+    
+    
+
+-- Addons:
+-- SaveManager (Allows you to have a configuration system)
+-- InterfaceManager (Allows you to have a interface managment system)
+
+-- Hand the library over to our managers
+SaveManager:SetLibrary(Fluent)
+InterfaceManager:SetLibrary(Fluent)
+
+-- Ignore keys that are used by ThemeManager.
+-- (we dont want configs to save themes, do we?)
+SaveManager:IgnoreThemeSettings()
+
+-- You can add indexes of elements the save manager should ignore
+SaveManager:SetIgnoreIndexes({})
+
+-- use case for doing it this way:
+-- a script hub could have themes in a global folder
+-- and game configs in a separate folder per game
+InterfaceManager:SetFolder("FluentScriptHub")
+SaveManager:SetFolder("FluentScriptHub/specific-game")
+
+InterfaceManager:BuildInterfaceSection(Tabs.Configuration)
+
+Window:SelectTab(1)
+
+Fluent:Notify({
+    Title = "Notification",
+    Content = "The script has been loaded.",
+    Duration = 5
+})
+
+-- You can use the SaveManager:LoadAutoloadConfig() to load a config
+-- which has been marked to be one that auto loads!
+SaveManager:LoadAutoloadConfig()
+
+
+
+--Ui
+
+do
+    local ToggleUI = game.CoreGui:FindFirstChild("MyToggle") 
+    if ToggleUI then 
+        ToggleUI:Destroy()
+    end
+end
+
+local UserInputService = game:GetService("UserInputService")
+
+local MyToggle = Instance.new("ScreenGui")
+local ImageButton = Instance.new("ImageButton")
+local UICorner = Instance.new("UICorner")
+
+--Properties:
+MyToggle.Name = "MyToggle"
+MyToggle.Parent = game.CoreGui
+MyToggle.ZIndexBehavior = Enum.ZIndexBehavior.Sibling
+
+ImageButton.Parent = MyToggle
+ImageButton.BackgroundColor3 = Color3.fromRGB(255, 255, 255)
+ImageButton.BorderColor3 = Color3.fromRGB(0, 0, 0)
+ImageButton.BorderSizePixel = 0
+ImageButton.Position = UDim2.new(0.156, 0, 0, 0)
+ImageButton.Size = UDim2.new(0, 50, 0, 50)
+ImageButton.Image = "rbxassetid://76019444052486"
+
+UICorner.CornerRadius = UDim.new(0, 10)
+UICorner.Parent = ImageButton
+
+-- Drag Functionality:
+local dragging = false
+local dragInput, dragStart, startPos
+
+ImageButton.InputBegan:Connect(function(input)
+	if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then
+		dragging = true
+		dragStart = input.Position
+		startPos = ImageButton.Position
+
+		input.Changed:Connect(function()
+			if input.UserInputState == Enum.UserInputState.End then
+				dragging = false
+			end
+		end)
+	end
+end)
+
+ImageButton.InputChanged:Connect(function(input)
+	if input.UserInputType == Enum.UserInputType.MouseMovement or input.UserInputType == Enum.UserInputType.Touch then
+		dragInput = input
+	end
+end)
+
+UserInputService.InputChanged:Connect(function(input)
+	if input == dragInput and dragging then
+		local delta = input.Position - dragStart
+		ImageButton.Position = UDim2.new(
+			startPos.X.Scale,
+			startPos.X.Offset + delta.X,
+			startPos.Y.Scale,
+			startPos.Y.Offset + delta.Y
+		)
+	end
+end)
+
+-- Toggle functionality (optional, edit as needed):
+ImageButton.MouseButton1Click:Connect(function()
+	local targetUI = game.CoreGui:FindFirstChild("ScreenGui")
+	if targetUI then
+		targetUI.Enabled = not targetUI.Enabled
+	end
+end)
+
+
+
+--AFK
+game:GetService("Players").LocalPlayer.Idled:Connect(function()
+    game:GetService("VirtualUser"):CaptureController()
+    game:GetService("VirtualUser"):ClickButton2(Vector2.new())
+end)
+
+while wait(180) do
+    game:GetService("VirtualUser"):CaptureController()
+    game:GetService("VirtualUser"):ClickButton2(Vector2.new())
+end
